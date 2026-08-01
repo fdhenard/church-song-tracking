@@ -8,9 +8,12 @@
 (def ^:private config-path-env-var
   "CHURCH_SONG_TRACKING_CONFIG_PATH")
 
-(def config-schema
+(def ^:private non-empty-string [:string {:min 1}])
+
+(def ^:private config-schema
   [:map
-   [:db-path string?]])
+   [:data-base-dir non-empty-string]
+   [:db-name non-empty-string]])
 
 (defn- validate-config
   [config path]
@@ -44,8 +47,11 @@
   "Return application configuration, reloading it at most once every five minutes."
   (memo/ttl get-config-no-memo :ttl/threshold (* 5 60 1000)))
 
-(defn get-db-path []
-  (:db-path (get-config)))
+(defn get-data-base-dir []
+  (:data-base-dir (get-config)))
+
+(defn get-db-path [] 
+  (str (get-data-base-dir) "/" (:db-name (get-config))))
 
 
 (comment
