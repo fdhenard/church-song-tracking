@@ -1,0 +1,14 @@
+{
+  "calva.replConnectSequences": [
+    {
+      "name": "church-song-tracking-repl-connect",
+      "projectType": "deps.edn",
+      "autoSelectForJackIn": true,
+      "projectRootPath": ["."],
+      "cljsType": "none",
+      "menuSelections": {
+        "cljAliases": ["neil"]
+      }
+    }
+  ]
+}
