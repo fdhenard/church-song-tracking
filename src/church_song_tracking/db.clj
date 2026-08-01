@@ -11,7 +11,7 @@
       (.mkdirs parent))
     {:store :database
      :migration-dir "migrations"
-     :db {:dbtype "sqlite"
+     :db {:dbtype "h2"
           :dbname path}}))
 
 (defn migrate!
@@ -28,6 +28,8 @@
   (migratus/rollback (db-config)))
 
 (comment
+  
+  (config/get-db-path)
   
   (migrate! nil)
 

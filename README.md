@@ -12,7 +12,7 @@ Create an EDN configuration file anywhere on your hard drive. For example:
 `~/dev/proggie_data/church-song-tracking/config.edn`:
 
 ```edn
-{:db-path "/absolute/path/to/church-song-tracking.db"}
+{:db-path "/absolute/path/to/church-song-tracking"}
 ```
 
 Add a line in `~/.zshrc` like this:
@@ -24,7 +24,7 @@ export CHURCH_SONG_TRACKING_CONFIG_PATH="${HOME}/dev/proggie_data/church-song-tr
 ### Migrations
 
 This project uses [Migratus](https://github.com/yogthos/migratus) to manage its
-SQLite schema. Migration files live in `resources/migrations` and use matching
+H2 schema. Migration files live in `resources/migrations` and use matching
 timestamped `up` and `down` files:
 
 ```text
@@ -47,4 +47,5 @@ $ clojure -X:rollback
 ```
 
 The configuration file must contain an EDN map with a `:db-path`. Its parent
-directory is created automatically when migrations run.
+directory is created automatically when migrations run. The path is the H2 file
+database base name; H2 stores the database in a file with an `.mv.db` suffix.

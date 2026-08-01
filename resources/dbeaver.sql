@@ -1,3 +1,2 @@
 
-select * from schema_migrations
-
+SELECT * FROM schema_migrations;

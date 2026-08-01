@@ -20,9 +20,10 @@ Roll back the latest migration with:
 clojure -X:rollback
 ```
 
-The default database is `data/church-song-tracking.db`. Override it with the
-`CHURCH_SONG_TRACKING_DB_PATH` environment variable or an explicit argument:
+The database path comes from the `:db-path` value in the EDN configuration file
+named by `CHURCH_SONG_TRACKING_CONFIG_PATH`. It is an H2 database base path; H2
+adds the `.mv.db` suffix. For example:
 
-```sh
-clojure -X:migrate :db-path '"/tmp/church-songs.db"'
+```edn
+{:db-path "/absolute/path/to/church-song-tracking"}
 ```
