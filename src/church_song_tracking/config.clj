@@ -3,6 +3,7 @@
   (:require [clojure.core.memoize :as memo]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [malli.core :as m]))
 
 (def ^:private config-path-env-var
@@ -61,3 +62,25 @@
   (get-db-path)
 
   )
+(defn video-settings []
+  (let [config (get-config)]
+    {:local-ocr? true
+     :model (or (:video-model config) "gpt-4.1-mini")
+     :python (or (:video-python config) ".video-tools/bin/python")}))
+
+(defn get-video-cache-dir []
+  (let [path (or (not-empty (str/trim (or (System/getenv "CHURCH_SONG_TRACKING_VIDEO_CACHE_DIR") "")))
+                 (:video-cache-dir (get-config))
+                 (str (System/getProperty "user.home") "/Library/Caches/church-song-tracking/vimeo-imports"))]
+    (when-not (.isAbsolute (io/file path))
+      (throw (ex-info "Video cache directory must be an absolute local path." {})))
+    path))
+
+(defn get-slide-archive-dir []
+  (let [file (.getCanonicalFile (io/file (or (not-empty (str/trim (or (System/getenv "CHURCH_SONG_TRACKING_SLIDE_ARCHIVE_DIR") "")))
+                                             (:slide-archive-dir (get-config))
+                                             (str (io/file (.getParentFile (.getAbsoluteFile (io/file (get-db-path)))) "slide-images")))))
+        cache (.getCanonicalFile (io/file (get-video-cache-dir)))]
+    (when (.startsWith (.toPath file) (.toPath cache))
+      (throw (ex-info "The permanent slide archive must be outside the video cache." {})))
+    (.getAbsolutePath file)))

@@ -1,10 +1,20 @@
 {:paths ["src" "resources"]
- :deps {metosin/malli          {:mvn/version "0.20.1"}
+ :deps {ring/ring-jetty-adapter {:mvn/version "1.15.6"}
+        ring/ring-core {:mvn/version "1.15.6"}
+        ring/ring-anti-forgery {:mvn/version "1.4.0"}
+        metosin/reitit-ring {:mvn/version "0.9.1"}
+        hiccup/hiccup {:mvn/version "2.0.0"}
+        metosin/malli          {:mvn/version "0.20.1"}
         migratus/migratus      {:mvn/version "1.6.6"}
+        org.clojure/data.json {:mvn/version "2.5.0"}
         org.clojure/data.csv    {:mvn/version "1.1.0"}
         org.clojure/core.memoize {:mvn/version "1.2.281"}
-        com.h2database/h2       {:mvn/version "2.4.240"}}
+        com.h2database/h2       {:mvn/version "2.4.240"}
+        com.github.seancorfield/next.jdbc {:mvn/version "1.3.1118"}}
  :aliases
- {:migrate  {:exec-fn church-song-tracking.db/migrate!}
+ {:admin {:exec-fn church-song-tracking.admin/start!}
+  :backfill-slide-images {:exec-fn church-song-tracking.slide-archive/backfill!}
+  :ingest {:exec-fn church-song-tracking.initial-ingest/initial-ingest}
+  :migrate  {:exec-fn church-song-tracking.db/migrate!}
   :rollback {:exec-fn church-song-tracking.db/rollback!}
   :neil     {:project {:name church-song-tracking/church-song-tracking}}}}

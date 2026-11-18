@@ -3,3 +3,8 @@
 .cpcache
 .lsp
 .nrepl-port
+
+.video-tools/
+__pycache__/
+
+.DS_Store
