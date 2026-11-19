@@ -132,6 +132,14 @@ and evidence previews. Changing the location requires stopping the admin, moving
 existing cache files to the new directory, and restarting; the app does not copy
 or fall back to the old Dropbox location. The H2 database stays in `:data-base-dir`.
 
+When the admin starts, it checks the local cache for unfinished imports. A missing
+video returns an import without a draft to pending download. Saved drafts and
+OCR ranges are kept. If selected slide frames are also missing, the draft needs
+OCR again before approval. If none of the expected import directories are found
+for multiple unfinished imports, startup reports the count and configured path
+in the terminal and defers updates until each import is opened or retried.
+The admin also checks individual imports when you open a draft or start a job.
+
 ### Choose a video section before OCR
 
 After downloading, choose **Choose OCR range** beside the service. Use the video
@@ -330,6 +338,8 @@ For approvals made after automatic cleanup was introduced, approval first preser
 ### Optional Vimeo download session
 
 When Vimeo blocks a public download, expand **Vimeo download session** on Import services. Open Vimeo in Chrome (default profile) or Firefox, sign in and complete any verification, then select that browser and click **Save Vimeo session**. This explicitly reads the browser cookie store; only Vimeo cookies are saved. macOS may ask for access to Chrome’s cookie encryption key. Firefox can be used if Chrome cannot be read.
+
+On macOS, saving a browser session may require **Full Disk Access** for the terminal app that launches the admin (**iTerm** for iTerm2, or **Terminal** for Apple Terminal). If **Save Vimeo session** fails and reading the browser cookie database from that terminal returns `Operation not permitted`, open **System Settings → Privacy & Security → Full Disk Access** and enable the terminal app. If macOS offers folder-specific access, select just the browser profile folder. Full Disk Access applies to the terminal and the commands it runs. Quit the terminal app completely with **⌘Q**, reopen it, run `clojure -X:admin` from the repo, and retry **Save Vimeo session**. Firefox uses its cookie database directly. The Keychain prompt applies to Chrome. Public downloads use the app’s default download flow and need no browser session.
 
 The saved session is stored with owner-only permissions at `~/Library/Application Support/church-song-tracking/vimeo-session.cookies`, outside Dropbox, H2, and the disposable video cache. The app never asks for a Vimeo password. Downloads try public access first, then retry an access denial once using the saved session. An expired or rejected session must be refreshed with **Save Vimeo session**. **Disconnect Vimeo session** removes the local saved copy; it does not sign you out of your browser. Jobs already running may finish using their loaded session.
 

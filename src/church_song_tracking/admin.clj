@@ -1152,9 +1152,11 @@
                                [:button {:name "action" :value (if (jobs/active-statuses (:job_status item)) "cancel-import" "start-import")}
                                 (cond (jobs/active-statuses (:job_status item)) "Cancel processing"
                                       (= "failed" (:job_status item)) "Retry import"
-                                      (:range_needs_ocr item) "OCR selected range"
+                                      (and (:range_needs_ocr item) downloaded) "OCR selected range"
                                       downloaded "Continue import"
                                       :else "Start import")]])
+                        (when (and (:draft_data item) (:range_needs_ocr item))
+                          [:a.button.secondary {:href (str "/imports/" (:id item))} "Review saved draft"])
                         (when (and downloaded (not (:is_merged item)) (not (:imported_service_id item))
                                    (not (:merged_into_selection_id item)) (not (jobs/active-statuses (:job_status item))))
                           [:a.button.secondary {:href (merge-link (:vimeo_url item))} "Merge with another service"])
@@ -1407,7 +1409,15 @@
   ([req] (review-page req nil nil))
   ([req error submitted]
    (let [id (some-> (get-in req [:path-params :id]) parse-long)
-         selection (when id (review/selection id))]
+         [selection cache-error]
+         (when id
+           (if error
+             [(review/selection id)]
+             (try [(jobs/recheck-cache! id)]
+                  (catch clojure.lang.ExceptionInfo e
+                    (if (= :cache-unreadable (:kind (ex-data e)))
+                      [(review/selection id) (.getMessage e)]
+                      (throw e))))))]
      (if-not selection
        {:status 404 :body "Selection not found"}
        (let [data (or submitted (review/draft selection))
@@ -1427,6 +1437,7 @@
              [:p.notice "Possible duplicate service in the library. Save your draft first. "
               [:a.button.secondary {:href (str "/services/merge?selection=" id)} "Compare and merge service"]])
            (when error [:div.error {:role "alert"} error])
+           (when cache-error [:div.error {:role "alert"} cache-error])
            (when (= "suggestions" (get-in req [:params "notice"])) [:p.notice {:role "status"} "Suggestions prepared from saved OCR. Review the fields beside each source slide before approving."])
            (when (= "saved" (get-in req [:params "notice"])) [:p.notice {:role "status"} "Draft saved. Review your changes before approving."])
            (if (:imported_service_id selection)
@@ -1437,8 +1448,12 @@
                 [:button {:type "submit" :form "review-draft" :name "action" :value "save-draft"} "Save draft"]]
                (when-not (:extracted_data selection)
                  [:p.notice "No video extraction is available yet. Use Start import from the import list to download and analyze this video."])
-               (when (:range_needs_ocr selection)
-                 [:p.notice "The OCR range changed. Run local OCR for the new range before approving. Your field edits are preserved. "
+               (when (#{jobs/missing-cache-message jobs/missing-evidence-message jobs/missing-merge-message}
+                       (:job_message selection))
+                 [:p.notice (:job_message selection) " "
+                  [:a {:href "/imports"} "Open Import services →"]])
+               (when (and (:range_needs_ocr selection) (jobs/downloaded-file id))
+                 [:p.notice "Run local OCR for the selected range before approving. Your field edits are preserved. "
                   [:a {:href (str "/imports/" id "/trim")} "Choose range and run OCR →"]])
                (when (:analysis-notes data) [:p.notice (:analysis-notes data)])
                (when (or (:extracted_data selection) (:range_needs_ocr selection))
@@ -1549,7 +1564,7 @@
                 [:form {:method "post" :action (str "/imports/" id)} (token)
                  [:input {:type "hidden" :name "revision" :value (:revision selection)}]
                  [:p {:id "approval-hint" :role "status"}]
-                 [:button {:id "approve-draft" :name "action" :value "approve" :disabled (or (nil? (:draft_data selection)) (:range_needs_ocr selection))} "Approve saved draft and import"]]]))))))))
+                 [:button {:id "approve-draft" :name "action" :value "approve" :disabled (or cache-error (nil? (:draft_data selection)) (:range_needs_ocr selection))} "Approve saved draft and import"]]]))))))))
 
 (defn save-review! [req]
   (let [id (some-> (get-in req [:path-params :id]) parse-long)
@@ -1756,10 +1771,16 @@
   (when-let [s @server] (.stop s) (reset! server nil))
   (when-let [connection @database-connection] (.close ^java.sql.Connection connection) (reset! database-connection nil)))
 (defn start! [{:keys [port] :or {port 3000}}]
+  (stop!)
   (db/migrate! nil)
   (cleanup/resume-pending!)
   (jobs/recover!)
-  (stop!)
+  (try
+    (when-let [notice (jobs/reconcile-cache!)] (println notice))
+    (catch clojure.lang.ExceptionInfo e
+      (if (= :cache-unreadable (:kind (ex-data e)))
+        (println (.getMessage e))
+        (throw e))))
   (reset! database-connection (jdbc/get-connection (db/get-datasource)))
   (try
     (reset! server (jetty/run-jetty #'app {:host "127.0.0.1" :port port :join? false}))

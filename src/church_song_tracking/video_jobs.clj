@@ -3,13 +3,17 @@
             [church-song-tracking.vimeo-session :as vimeo-session]
             [church-song-tracking.video-metadata :as metadata]
             [church-song-tracking.db :as db]
+            [church-song-tracking.slide-archive :as archive]
             [church-song-tracking.vimeo-import :as vimeo]
             [clojure.data.json :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [next.jdbc :as jdbc]
             [next.jdbc.sql :as sql])
-  (:import [java.util UUID]
+  (:import [java.io IOException]
+           [java.nio.file Files LinkOption NoSuchFileException]
+           [java.nio.file.attribute BasicFileAttributes]
+           [java.util UUID]
            [java.util.concurrent Executors ExecutorService ThreadFactory TimeUnit]))
 
 (def active-statuses #{"queued" "downloading" "extracting" "recognizing" "merging"})
@@ -67,6 +71,102 @@
       (first (filter #(and (.isFile %) (re-matches #"video\.(mp4|webm|mkv|mov)" (.getName %)))
                      (.listFiles directory))))))
 
+(defn- cache-attributes [file]
+  (let [path (.toPath file)]
+    (try
+      (let [attrs (Files/readAttributes path BasicFileAttributes (make-array LinkOption 0))]
+        (when-not (and (Files/isReadable path)
+                       (or (not (.isDirectory attrs)) (Files/isExecutable path)))
+          (throw (IOException. "Cache entry is unreadable")))
+        attrs)
+      (catch NoSuchFileException _ nil)
+      (catch IOException cause
+        (throw (ex-info "Cannot read the local video cache. Check its path and permissions."
+                        {:kind :cache-unreadable} cause))))))
+
+(defn- cache-directory? [file]
+  (when-let [attrs (cache-attributes file)]
+    (when-not (.isDirectory attrs)
+      (throw (ex-info "The local video cache path must be a directory." {:kind :cache-unreadable})))
+    true))
+
+(defn- missing-review-frame? [folder data]
+  (when data
+    (let [draft (edn/read-string data)
+          indexes (keep #(archive/frame-index % nil)
+                        (cons (:sermon-evidence-index draft) (map :evidence-index (:songs draft))))]
+      (when (seq indexes) (cache-directory? (io/file folder "frames")))
+      (some (fn [index]
+              (let [attrs (cache-attributes (archive/source-frame folder index))]
+                (not (and attrs (.isRegularFile attrs) (pos? (.size attrs))))))
+            indexes))))
+
+(def missing-cache-message "The cached video is missing. Download it again to restore playback.")
+(def missing-evidence-message "The cached video and selected slide evidence are missing. Download the video and run OCR again. Your saved edits are preserved.")
+(def missing-merge-message "The merged video cache is missing. Restore the original merge cache before retrying.")
+
+(defn- expects-cache? [row]
+  (and row (nil? (:imported_service_id row)) (nil? (:merged_into_selection_id row))
+       (not (active-statuses (:job_status row)))
+       (or (:draft_data row) (#{"downloaded" "ready"} (:job_status row)))))
+
+(defn- cache-change [root row]
+  (let [folder (io/file root (str (:id row)))]
+    (when (cache-directory? folder)
+      (cache-attributes (io/file folder "metadata.json")))
+    (if-let [video (downloaded-file (:id row))]
+      (do (cache-attributes video)
+          (when (= missing-cache-message (:job_message row))
+            {:job_message nil}))
+      (let [draft? (some? (:draft_data row))
+            needs-ocr (boolean (or (:range_needs_ocr row)
+                                   (missing-review-frame? folder (:draft_data row))))
+            status (cond (:is_merged row) "failed"
+                         (not draft?) "selected"
+                         needs-ocr "failed"
+                         :else "ready")
+            message (cond (:is_merged row) missing-merge-message
+                          (and draft? needs-ocr) missing-evidence-message
+                          :else missing-cache-message)
+            fields {:job_status status :job_message message :range_needs_ocr needs-ocr
+                    :job_token nil :job_refresh_review false}]
+        (when (and (not= fields (select-keys row (keys fields)))
+                   (or (#{"downloaded" "ready"} (:job_status row))
+                       (not= needs-ocr (:range_needs_ocr row))))
+          fields)))))
+
+(defn- reconcile-cache-row! [tx root row]
+  (if-let [change (when (expects-cache? row) (cache-change root row))]
+    (do (sql/update! tx :vimeo_import_selection change {:id (:id row)})
+        (merge row change))
+    row))
+
+(defn recheck-cache! [id]
+  (jdbc/with-transaction [tx (db/get-datasource)]
+    (let [row (first (sql/query tx ["select * from vimeo_import_selection where id = ? for update" id] vimeo/opts))]
+      (if (expects-cache? row)
+        (let [root (io/file (config/get-video-cache-dir))]
+          (cache-directory? root)
+          (reconcile-cache-row! tx root row))
+        row))))
+
+(defn reconcile-cache! []
+  (jdbc/with-transaction [tx (db/get-datasource)]
+    (let [root (io/file (config/get-video-cache-dir))
+          rows (sql/query tx ["select id, job_status, job_message, job_token, job_refresh_review,
+                                      range_needs_ocr, draft_data, is_merged
+                               from vimeo_import_selection
+                               where imported_service_id is null and merged_into_selection_id is null
+                                 and (job_status in ('downloaded', 'ready') or draft_data is not null)
+                                 and job_status not in ('queued', 'downloading', 'extracting', 'recognizing', 'merging')"] vimeo/opts)
+          _ (cache-directory? root)]
+      (if (and (> (count rows) 1)
+               (not-any? #(cache-directory? (io/file root (str (:id %)))) rows))
+        (str "The video cache is empty or missing at " root ". " (count rows)
+             " unfinished imports expect cached files. Check the configured path. Individual imports will be checked when opened or retried.")
+        (do (doseq [row rows] (reconcile-cache-row! tx root row))
+            nil)))))
+
 (declare run-job!)
 
 (defn complete-download! [id token revision url settings]
@@ -74,7 +174,7 @@
     (jdbc/with-transaction [tx (db/get-datasource)]
       (let [row (first (sql/query tx ["select * from vimeo_import_selection where id = ? for update" id] vimeo/opts))]
         (when-not (and (= token (:job_token row)) (= revision (:revision row))
-                       (active-statuses (:job_status row)) (nil? (:draft_data row)) (nil? (:imported_service_id row)))
+                       (active-statuses (:job_status row)) (nil? (:imported_service_id row)))
           (throw (ex-info "The selection changed while downloading; the video is retained without starting analysis." {})))
         (when (:is_merged row)
           (let [data (json/read-str (slurp (io/file (config/get-video-cache-dir) (str id) "metadata.json")) :key-fn keyword)]
@@ -84,10 +184,14 @@
                 {:import_selection_id id :source_selection_id (:selection_id source)}))))
         (sql/update! tx :vimeo_import_selection
           {:vimeo_video_title (or (metadata/downloaded-title id) (metadata/original-title row))
-           :job_status (if continue? "queued" "downloaded")
-           :job_message (if (:is_merged row) "Merged recording ready · choose an OCR range, then continue import"
-                          (if continue? "Video downloaded · waiting for OCR and image recognition"
-                                      "Video downloaded · ready to continue import"))}
+           :job_status (cond continue? "queued"
+                             (and (:draft_data row) (not (:range_needs_ocr row))) "ready"
+                             :else "downloaded")
+           :job_message (cond (:is_merged row) "Merged recording ready · choose an OCR range, then continue import"
+                              continue? "Video downloaded · waiting for OCR and image recognition"
+                              (:range_needs_ocr row) "Video downloaded · run OCR for the selected range"
+                              (:draft_data row) "Video downloaded · review the saved draft"
+                              :else "Video downloaded · ready to continue import")}
           {:id id})))
     (when continue?
       (submit-stage! false #(run-job! id token revision url
@@ -153,7 +257,8 @@
   ([id download-only? _legacy-local-only?]
    (let [local-only? true
         settings (preflight! true)
-        selected-row (sql/get-by-id (db/get-datasource) :vimeo_import_selection id vimeo/opts)
+        _ (cache-directory? (io/file (config/get-video-cache-dir)))
+        selected-row (recheck-cache! id)
         cached? (and (boolean (downloaded-file id))
                      (or (not (:is_merged selected-row))
                          (not (seq (sql/query (db/get-datasource) ["select id from service_video_source where import_selection_id = ? and merged_start_seconds is null" id] vimeo/opts)))))
@@ -168,10 +273,14 @@
                 (when-not row (throw (ex-info "Selection not found." {:kind :unavailable})))
                 (when (:merged_into_selection_id row)
                   (throw (ex-info "This recording is part of a merged service. Continue the merged recording instead." {:kind :unavailable})))
-                (when (or (:imported_service_id row) (and (:draft_data row) (not (:range_needs_ocr row))))
+                (when (or (:imported_service_id row)
+                          (and (:draft_data row) (not (:range_needs_ocr row)) (not download-only?)))
                   (throw (ex-info "This service already has a draft or has been imported. Review it before starting another analysis." {:kind :unavailable})))
                 (when (active-statuses (:job_status row))
                   (throw (ex-info "This service is already queued or processing." {:kind :busy})))
+                (when (and (:is_merged row) (not cached?)
+                           (not (.isFile (io/file (config/get-video-cache-dir) (str id) "merge-plan.json"))))
+                  (throw (ex-info missing-merge-message {:kind :unavailable})))
                 (sql/update! tx :vimeo_import_selection {:job_token token :job_refresh_review (boolean (:range_needs_ocr row)) :job_status "queued" :job_message (if (and (:is_merged row) (not cached?)) "Waiting for a merge slot"
                                                                             (if download-stage? "Waiting for a download slot"
                                                                                              (if local-only? "Waiting for local OCR · no API calls" "Video downloaded · waiting for OCR and image recognition")))} {:id id})

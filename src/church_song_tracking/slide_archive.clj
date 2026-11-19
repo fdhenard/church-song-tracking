@@ -22,6 +22,8 @@
 (defn frame-index [index time]
   (let [n (if (integer? index) index (time-index time))]
     (when (and n (<= 0 n 1000000)) n)))
+(defn source-frame [folder index]
+  (io/file folder "frames" (format "frame-%06d.jpg" (inc index))))
 (defn safe-image-file [path]
   (when (seq path)
     (let [root (.toPath (.getCanonicalFile (io/file (config/get-slide-archive-dir))))
@@ -46,7 +48,7 @@
   (let [index (frame-index index time)]
     (when index
       (let [folder (when selection-id (io/file (config/get-video-cache-dir) (str selection-id)))
-            source (when folder (io/file folder "frames" (format "frame-%06d.jpg" (inc index))))]
+            source (when folder (source-frame folder index))]
         (when (and folder (not (.isFile source))) (recover-frame! folder index))
         (if-not (and source (.isFile source) (pos? (.length source)))
           (when required? (throw (ex-info "The selected title-slide image is missing. Restore its cached video/frame before approving this service." {:selection-id selection-id :frame index})))

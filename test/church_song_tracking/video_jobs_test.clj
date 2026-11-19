@@ -159,4 +159,47 @@ https://vimeo.com/456"})
       (is (= 1 (jobs/download-selected! ["https://vimeo.com/123" "https://vimeo.com/456"])))
       (is (= [[1 true]] @started)))))
 
+(deftest cache-reconciliation-preserves-draft-and-checks-selected-frames
+  (let [dir (java.nio.file.Files/createTempDirectory "missing-video-cache-test" (make-array java.nio.file.attribute.FileAttribute 0))
+        cache (io/file (str dir) "cache")
+        draft {:title "Edited title" :songs [{:title "Edited song" :evidence-index 0}]}]
+    (with-redefs [config/get-db-path #(str dir "/songs")
+                  config/get-video-cache-dir #(.getPath cache)
+                  jobs/preflight! (constantly {})
+                  jobs/submit-stage! (fn [_ _])]
+      (db/migrate! nil)
+      (vimeo/select! {"links" "https://vimeo.com/123\nhttps://vimeo.com/456"})
+      (let [[download reviewed] (map :id (vimeo/queue))
+            frames (io/file cache (str reviewed) "frames")
+            frame (io/file frames "frame-000001.jpg")
+            ds (db/get-datasource)]
+        (sql/update! ds :vimeo_import_selection
+          {:job_status "downloaded" :range_needs_ocr true :trim_start_seconds 6} {:id download})
+        (sql/update! ds :vimeo_import_selection
+          {:job_status "ready" :draft_data (pr-str draft) :trim_start_seconds 9} {:id reviewed})
+        (is (str/includes? (jobs/reconcile-cache!) "2 unfinished imports"))
+        (is (= "downloaded" (:job_status (review/selection download))))
+        (.mkdirs frames)
+        (spit frame "slide image")
+        (is (nil? (jobs/reconcile-cache!)))
+        (let [row (review/selection download)]
+          (is (= "selected" (:job_status row)))
+          (is (:range_needs_ocr row))
+          (is (= 6 (:trim_start_seconds row))))
+        (is (= "ready" (:job_status (review/selection reviewed))))
+        (is (false? (:range_needs_ocr (review/selection reviewed))))
+        (is (.delete frame))
+        (let [row (jobs/recheck-cache! reviewed)]
+          (is (= "failed" (:job_status row)))
+          (is (:range_needs_ocr row))
+          (is (= 9 (:trim_start_seconds row)))
+          (is (= draft (review/draft row)))
+          (is (= row (jobs/recheck-cache! reviewed)))
+          (let [token (jobs/start! reviewed true)]
+            (jobs/complete-download! reviewed token (:revision row) (:vimeo_url row) {})
+            (let [downloaded (review/selection reviewed)]
+              (is (= "downloaded" (:job_status downloaded)))
+              (is (:range_needs_ocr downloaded))
+              (is (= draft (review/draft downloaded))))))))))
+
 (let [result (run-tests)] (when (pos? (+ (:fail result) (:error result))) (System/exit 1)))

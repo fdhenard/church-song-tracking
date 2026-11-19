@@ -261,7 +261,7 @@
     ;; Serialize approvals across selections to prevent duplicate service dates.
     (sql/query tx ["select id from import_approval_lock where id = 1 for update"])
     (let [row (locked tx id revision)
-          _ (when (:range_needs_ocr row) (throw (ex-info "The OCR range changed. Run local OCR for the new range before approving." {})))
+          _ (when (:range_needs_ocr row) (throw (ex-info "Run local OCR for the selected range before approving." {})))
           _ (when (:merged_into_selection_id row) (throw (ex-info "Review the combined recording instead of this source part." {})))
           data (validated (merge (draft row) (when (map? reconciliation?) (:service-overrides reconciliation?))))
           ;; Refuse to merge into an existing service without a separate reconciliation review.
