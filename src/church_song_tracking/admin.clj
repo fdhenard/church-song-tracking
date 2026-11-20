@@ -216,7 +216,7 @@
          (let [q (str/lower-case (get-in req [:params "q"] ""))
                groups (filter #(str/includes? (str/lower-case (str/join " " (mapcat (juxt :name :artist) %))) q) (song-merge/groups ds))]
            (list
-             [:p "Compare records with the same title, then choose which actually represent the same song. Names are grouped ignoring letter case and extra spaces."]
+             [:p "Compare records with the same title, then choose which actually represent the same song. Titles are grouped ignoring letter case, extra spaces, and punctuation."]
              [:form.search {:method "get" :action "/songs/merge"}
               [:input {:name "q" :value (get-in req [:params "q"] "") :placeholder "Search duplicate titles or artists" :aria-label "Search duplicate songs"}]
               [:button "Search"]]
@@ -226,7 +226,7 @@
                   [:tr [:td (:name (first group))] [:td (str/join " · " (distinct (map :artist group)))]
                    [:td (count group)] [:td (reduce + (map :performance_count group))]
                    [:td [:a.button.secondary {:href (song-merge-link (:id (first group)))} "Compare and merge"]]])
-                [[:tr [:td {:colspan 5} "No matching duplicate song titles."]]])]]]))
+                [:tr [:td {:colspan 5} "No matching duplicate song titles."]])]]]))
          (if (< (count songs) 2)
            [:p.notice "This song has no other same-title records to compare. It may already have been merged. " [:a {:href "/songs/merge"} "View other duplicate songs"]]
            (let [comparison (song-merge/snapshot ds (map :id songs) false)
@@ -1224,7 +1224,7 @@
          discarded (vimeo/discarded-services)
          discarded-urls (set (map :vimeo_url discarded))
          available (vimeo/newest-videos
-                     (filter #(and (str/includes? (str/lower-case (or (:title %) "")) "livestream")
+                     (filter #(and (vimeo/service-video-title? (:title %))
                                    (not (contains? imported-urls (:url %)))
                                    (not (contains? selected-urls (:url %)))
                                    (not (contains? discarded-urls (:url %)))) catalog))
@@ -1286,7 +1286,7 @@
                       (if (and item (or (= "failed" (:job_status item)) (:draft_data item) (jobs/downloaded-file (:id item))))
                         (import-selection-row item video-titles title-groups)
                         (available-download-row video title-groups page-number)))
-                    (list [:tr [:td.empty {:colspan 3} "No services need your action. No unimported Livestream videos were found in the cached catalog."]]))]]]
+                    (list [:tr [:td.empty {:colspan 3} "No services need your action. No unimported service videos were found in the cached catalog."]]))]]]
          [:details [:summary "Download a service by Vimeo link"]
           [:form.card {:method "post" :action "/imports"} (token)
            [:input {:type "hidden" :name "action" :value "select"}]

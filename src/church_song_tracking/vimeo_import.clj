@@ -81,12 +81,23 @@
     urls))
 
 (defn title-key [title] (str/join " " (str/split (str/lower-case (str/trim (or title ""))) #"\s+")))
+(defn- parse-service-date [[_ month day year]]
+  (when year
+    (try (str (java.time.LocalDate/of (+ (parse-long year) (if (= 2 (count year)) 2000 0))
+                                      (parse-long month) (parse-long day)))
+         (catch java.time.DateTimeException _ nil))))
+
+(defn- date-only-title [title]
+  (parse-service-date (re-matches #"\s*(\d{1,2})[-/.](\d{1,2})[-/.](\d{4}|\d{2})\s*" (or title ""))))
+
+(defn service-video-title? [title]
+  (boolean (or (re-find #"(?i)\blive\s*stream" (or title ""))
+               (date-only-title title))))
+
 (defn video-sort-key [{:keys [title url]}]
-  (let [[_ month day year] (re-find #"(?i)^\s*livestream\s*[:\-]?\s*(\d{1,2})[-/.](\d{1,2})[-/.](\d{4}|\d{2})(?!\d)" (or title ""))
-        date (when year
-               (try (str (java.time.LocalDate/of (+ (parse-long year) (if (= 2 (count year)) 2000 0))
-                                                  (parse-long month) (parse-long day)))
-                    (catch Exception _ nil)))
+  (let [date (or (date-only-title title)
+                 (parse-service-date
+                   (re-find #"(?i)\blive\s*stream\s*[:\-]?\s*(\d{1,2})[-/.](\d{1,2})[-/.](\d{4}|\d{2})(?!\d)" (or title ""))))
         id (or (some->> (re-find #"/([0-9]+)$" (or url "")) second bigint) 0N)]
     [(or date "0000-00-00") id]))
 (defn newest-videos [videos] (sort-by video-sort-key #(compare %2 %1) videos))

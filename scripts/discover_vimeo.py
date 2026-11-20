@@ -3,6 +3,7 @@ import argparse
 from collections import defaultdict
 import json
 from pathlib import Path
+import re
 import yt_dlp
 
 def normalized_title(title):
@@ -12,7 +13,7 @@ def enrich_duplicates(entries, lookup):
     groups = defaultdict(list)
     for entry in entries:
         title = normalized_title(entry.get('title'))
-        if 'livestream' in title:
+        if re.search(r'\blive ?stream', title):
             groups[title].append(entry)
     for group in groups.values():
         if len(group) < 2:

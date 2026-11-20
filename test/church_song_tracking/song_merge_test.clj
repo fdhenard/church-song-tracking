@@ -11,7 +11,7 @@
    (db/migrate! nil) (with-open [keeper (jdbc/get-connection (db/get-datasource))] (f)))))
 (defn fixture []
  (let [a (insert! :song {:name "Amazing Grace" :artist "John Newton"})
-       b (insert! :song {:name " amazing   grace " :artist "Newton, John"})
+       b (insert! :song {:name " amazing,   grace! " :artist "Newton, John"})
        c (insert! :song {:name "Amazing Grace" :artist "Different composition author"})
        leader (insert! :person {:name "Leader"})
        service (insert! :church_service {:date (java.time.LocalDate/parse "2026-01-04") :title "Worship"
@@ -27,6 +27,13 @@
  (let [ds (db/get-datasource) songs (merge/candidates ds a)]
   {"candidate" (mapv (comp str :id) songs) "source" [(str a) (str b)] "group" (str a) "retained" (str a)
    "name" "Amazing Grace" "artist" "John Newton" "version" (merge/version ds songs) "confirm" "yes"}))
+
+(deftest duplicate-song-page-renders-without-matches
+ (temporary-db
+  (fn []
+   (let [response (admin/app {:request-method :get :uri "/songs/merge" :headers {}})]
+    (is (= 200 (:status response)))
+    (is (str/includes? (:body response) "No matching duplicate song titles."))))))
 
 (deftest preserves-references-and-consolidates-only-identical-variations
  (temporary-db
@@ -46,7 +53,7 @@
     (is (nil? (sql/get-by-id ds :song b vimeo/opts)))
     (is (some? (sql/get-by-id ds :song c vimeo/opts)) "Unselected same-title / different-author composition stays separate")
     (is (= a (merge/canonical-id ds b)))
-    (is (= a (merge/find-song-id ds "Amazing Grace" "Newton, John")))
+    (is (= a (merge/find-song-id ds "Amazing, Grace!" "Newton, John")))
     (is (= 303 (:status (admin/edit-page {:path-params {:entity "songs" :id (str b)}}))))
     (is (= (str "/songs/" a) (get-in (admin/edit-page {:path-params {:entity "songs" :id (str b)}}) [:headers "Location"])))
     (is (= a (:song_id (sql/get-by-id ds :song_variation v3 vimeo/opts))))
@@ -65,7 +72,7 @@
      (is (= c (merge/canonical-id ds b)))
      (is (= c (merge/canonical-id ds a)))
      (is (= c (merge/find-song-id ds "Amazing Grace" "John Newton")))
-     (is (= c (merge/find-song-id ds "Amazing Grace" "Newton, John")))
+     (is (= c (merge/find-song-id ds "Amazing, Grace!" "Newton, John")))
      (is (= "Corrected artist" (:artist (sql/get-by-id ds :song c vimeo/opts)))))))))
 
 (deftest rejects-stale-or-invalid-merges-without-partial-changes

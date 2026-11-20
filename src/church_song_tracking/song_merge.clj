@@ -13,6 +13,15 @@
 (defn title-key [value]
   (-> (java.text.Normalizer/normalize (or value "") java.text.Normalizer$Form/NFKC)
       str/trim str/lower-case (str/replace #"\s+" " ")))
+
+(defn- merge-title-key [value]
+  (let [title (title-key value)
+        key (-> title
+                (str/replace #"(?<=\p{L})['’](?=\p{L})" "")
+                (str/replace #"[\p{P}\s]+" " ")
+                str/trim)]
+    (if (str/blank? key) title key)))
+
 (defn find-song-id [ds name artist]
   (or (:id (first (sql/find-by-keys ds :song {:name name :artist artist} vimeo/opts)))
       (let [identity [(title-key name) (title-key artist)]]
@@ -22,11 +31,12 @@
 (defn all-songs [ds]
   (sql/query ds ["select s.*, (select count(*) from song_variation v where v.song_id=s.id) as variation_count, (select count(*) from song_performance p join song_variation v on p.song_variation_id=v.id where v.song_id=s.id) as performance_count from song s order by s.name, s.id"] vimeo/opts))
 (defn groups [ds]
-  (->> (all-songs ds) (group-by #(title-key (:name %))) vals (filter #(> (count %) 1))
-       (sort-by #(title-key (:name (first %))))))
+  (->> (all-songs ds) (group-by #(merge-title-key (:name %))) vals (filter #(> (count %) 1))
+       (sort-by #(merge-title-key (:name (first %))))))
 (defn candidates [ds id]
   (when-let [song (sql/get-by-id ds :song id vimeo/opts)]
-    (filterv #(= (title-key (:name song)) (title-key (:name %))) (all-songs ds))))
+    (let [key (merge-title-key (:name song))]
+      (filterv #(= key (merge-title-key (:name %))) (all-songs ds)))))
 (defn canonical-id [ds old-id]
   (:canonical_song_id (sql/get-by-id ds :song_merge_alias old-id :old_song_id vimeo/opts)))
 (defn values [value] (cond (nil? value) [] (string? value) [value] :else value))
@@ -92,7 +102,7 @@
     (when-not (and (= (count candidate-ids) (count (:songs data)))
                    (every? (set candidate-ids) ids) (= (count ids) (count selected)) (contains? (set ids) target))
       (throw (ex-info "Choose a retained song from the selected records. A song may have changed or already been merged; reload the comparison." {})))
-    (when-not (= 1 (count (set (map #(title-key (:name %)) (:songs data)))))
+    (when-not (= 1 (count (set (map #(merge-title-key (:name %)) (:songs data)))))
       (throw (ex-info "Start from songs with matching titles. Reload the duplicate-song comparison." {})))
     (when-not (= (get params "version") (fingerprint data))
       (throw (ex-info "Song details or references changed since this screen was opened. Reload and compare the latest records before merging." {})))

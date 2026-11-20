@@ -62,18 +62,24 @@
                 vimeo/queue (fn [] [{:vimeo_url "https://vimeo.com/123"}])
                 vimeo/discover (fn [] [{:url "https://vimeo.com/123" :title "Imported Livestream service"}
                                       {:url "https://vimeo.com/456" :title "New LIVEstream service"}
+                                      {:url "https://vimeo.com/988039697" :title "East White Oak Bible Church Live Stream 07-28-24"}
+                                      {:url "https://vimeo.com/959676301" :title "06-23-24"}
+                                      {:url "https://vimeo.com/111" :title "02-30-24"}
                                       {:url "https://vimeo.com/789" :title "Sunday Message"}])]
     (let [body (:body (admin/imports-page {:params {}}))]
       (is (str/includes? body "New LIVEstream service"))
+      (is (str/includes? body "East White Oak Bible Church Live Stream 07-28-24"))
+      (is (str/includes? body "06-23-24"))
+      (is (not (str/includes? body "02-30-24")))
       (is (not (str/includes? body "Sunday Message")))
       (is (not (str/includes? body "Imported Livestream service")))
       (is (not (str/includes? body "href=\"https://vimeo.com/123\"")))
-      (is (str/includes? body "Ready for your next action · 1"))))
+      (is (str/includes? body "Ready for your next action · 3"))))
   (with-redefs [vimeo/imported-recordings (fn [_] (admin/rows nil "services"))
                 vimeo/discarded-services (constantly []) admin/rows (fn [_ _] [{:link_vimeo "https://vimeo.com/123"}])
                 vimeo/queue (constantly [])
                 vimeo/discover (fn [] [{:url "https://vimeo.com/123" :title "Imported Livestream service"}])]
-    (is (str/includes? (:body (admin/imports-page {:params {}})) "No unimported Livestream videos were found"))))
+    (is (str/includes? (:body (admin/imports-page {:params {}})) "No unimported service videos were found"))))
 
 (deftest available-list-survives-download-navigation-and-validation-errors
   (with-redefs [vimeo/imported-recordings (fn [_] (admin/rows nil "services"))
@@ -143,12 +149,13 @@
 
 (deftest videos-sort-by-service-date-before-upload-id
   (let [newer {:url "https://vimeo.com/100" :title "Livestream 06-07-26"}
-        older-new-upload {:url "https://vimeo.com/999" :title "Livestream 05-31-26"}
+        older-new-upload {:url "https://vimeo.com/999" :title "East White Oak Bible Church Live Stream 05-31-26"}
+        date-only {:url "https://vimeo.com/50" :title "06-01-26"}
         newer-duplicate {:url "https://vimeo.com/200" :title "LIVEstream 6/7/2026"}
         unknown {:url "https://vimeo.com/500" :title "Livestream"}
         unknown-newer {:url "https://vimeo.com/600" :title "Livestream 02-30-26"}]
-    (is (= [newer-duplicate newer older-new-upload unknown-newer unknown]
-           (vec (vimeo/newest-videos [older-new-upload unknown newer unknown-newer newer-duplicate]))))))
+    (is (= [newer-duplicate newer date-only older-new-upload unknown-newer unknown]
+           (vec (vimeo/newest-videos [older-new-upload unknown newer unknown-newer newer-duplicate date-only]))))))
 
 (deftest discarded-services-persist-hide-and-can-be-restored
   (let [dir (java.nio.file.Files/createTempDirectory "discard-service-test" (make-array java.nio.file.attribute.FileAttribute 0))

@@ -13,7 +13,10 @@ def timestamp(index):
 
 
 def service_date_from_title(title):
-    match = re.match(r'^\s*livestream\s*[:\-]?\s*(\d{1,2})[-/.](\d{1,2})[-/.](\d{4}|\d{2})(?!\d)', title or '', re.I)
+    date_pattern = r'(\d{1,2})[-/.](\d{1,2})[-/.](\d{4}|\d{2})'
+    title = title or ''
+    match = re.fullmatch(date_pattern, title.strip()) or re.search(
+        r'\blive\s*stream\s*[:\-]?\s*' + date_pattern + r'(?!\d)', title, re.I)
     if not match:
         return ''
     month, day, year = map(int, match.groups())

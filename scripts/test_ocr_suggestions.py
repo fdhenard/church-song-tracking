@@ -4,6 +4,8 @@ from ocr_suggestions import propose_details, apply_suggestions, service_date_fro
 class SuggestionTests(unittest.TestCase):
     def test_service_date_from_download_title(self):
         for title, expected in [('Livestream 07-05-26', '2026-07-05'), ('LIVEstream10-25-2026', '2026-10-25'),
+                                ('East White Oak Bible Church Live Stream 07-28-24', '2024-07-28'),
+                                ('06-23-24', '2024-06-23'),
                                 ('Livestream 9/13/26 Picnic', '2026-09-13'), ('Livestream 02-29-24', '2024-02-29')]:
             self.assertEqual(expected, service_date_from_title(title))
         for title in ['Message 07-05-26', 'Livestream 02-30-26', 'Livestream 13-05-26', 'Livestream', 'Livestream 7-5-20260']:
